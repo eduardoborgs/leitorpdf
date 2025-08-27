@@ -2,51 +2,50 @@ import streamlit as st
 import fitz  # PyMuPDF
 from deep_translator import GoogleTranslator
 from transformers import pipeline
-import torch # Necessário para o pipeline do transformers
+import torch
 
-# --- FUNÇÕES CORE ---
+st.set_page_config(
+    page_title="PDF PowerTool | Tradutor e Resumidor",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Função para extrair texto de um PDF
-# @st.cache_data # Opcional: Usar cache para não reprocessar o mesmo arquivo
-def extrair_texto_pdf(arquivo_pdf):
-    """
-    Extrai o texto de todas as páginas de um arquivo PDF.
-    """
+@st.cache_data
+def extrair_texto_pdf(file_bytes):
     try:
-        doc = fitz.open(stream=arquivo_pdf.read(), filetype="pdf")
-        texto_completo = ""
-        for pagina in doc:
-            texto_completo += pagina.get_text()
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        texto_completo = "".join(pagina.get_text() for pagina in doc)
         doc.close()
-        return texto_completo
+        
+        if not texto_completo.strip():
+            return None, "Erro: O PDF parece conter apenas imagens ou está vazio. Nenhum texto foi extraído."
+        
+        return texto_completo, None
     except Exception as e:
-        st.error(f"Erro ao ler o PDF: {e}")
-        return None
+        if "password" in str(e).lower():
+            return None, "Erro: Este PDF está protegido por senha e não pode ser lido."
+        else:
+            return None, f"Erro inesperado ao processar o PDF: {e}"
 
-# Função para traduzir o texto
 def traduzir_texto(texto, idioma_destino='pt'):
-    """
-    Traduz o texto para o idioma de destino usando o Google Translate.
-    """
     try:
         return GoogleTranslator(source='auto', target=idioma_destino).translate(texto)
     except Exception as e:
-        st.error(f"Erro na tradução: {e}")
-        return "Não foi possível traduzir o texto."
+        return f"Ocorreu um erro durante a tradução: {e}"
 
-# Função para resumir o texto
-# Usaremos um modelo multilingual que funciona bem com português.
-# @st.cache_resource # Cache para o modelo de IA não ser carregado toda hora
-def resumir_texto(texto):
-    """
-    Resume o texto usando um modelo da Hugging Face.
-    """
+@st.cache_resource
+def carregar_modelo_resumo(model_name):
     try:
-        # Carrega o modelo de sumarização (pode demorar na primeira vez)
-        summarizer = pipeline("summarization", model="google/mt5-small", tokenizer="google/mt5-small")
-        # Dividir o texto em pedaços menores se for muito grande
+        summarizer = pipeline("summarization", model=model_name)
+        return summarizer
+    except Exception as e:
+        st.error(f"Erro ao carregar o modelo '{model_name}': {e}")
+        return None
+
+def resumir_texto(texto, summarizer):
+    try:
         max_chunk_length = 1024
-        chunks = [texto[i:i+max_chunk_length] for i in range(0, len(texto), max_chunk_length)]
+        chunks = [texto[i:i + max_chunk_length] for i in range(0, len(texto), max_chunk_length)]
         
         resumo_final = ""
         for chunk in chunks:
@@ -56,66 +55,76 @@ def resumir_texto(texto):
         
         return resumo_final.strip()
     except Exception as e:
-        st.error(f"Erro ao resumir: {e}")
-        return "Não foi possível gerar o resumo."
+        return f"Ocorreu um erro ao gerar o resumo: {e}"
 
-# O resto do código da interface Streamlit virá aqui...
-# --- INTERFACE STREAMLIT ---
-
-st.set_page_config(page_title="PDF PowerTool", layout="wide")
+with st.sidebar:
+    st.title("PDF PowerTool")
+    st.markdown("---")
+    st.header("1. Faça o Upload do PDF")
+    arquivo_pdf = st.file_uploader("Selecione o arquivo", type=["pdf"], label_visibility="collapsed")
+    st.markdown("---")
+    st.subheader("Sobre")
+    st.info(
+        "Este aplicativo foi criado para facilitar a leitura e o entendimento de documentos em PDF."
+        "\n\n**Tecnologias:**\n- Python & Streamlit\n- PyMuPDF\n- Hugging Face Transformers"
+    )
 
 st.title(" ferramenta de Tradução e Resumo de PDFs")
-st.markdown("Faça o upload de um arquivo PDF e escolha a ação desejada.")
+st.markdown("Faça o upload de um arquivo PDF na barra lateral para começar.")
 
-# Colunas para organizar a interface
-col1, col2 = st.columns(2)
+if arquivo_pdf is None:
+    st.warning("Por favor, carregue um arquivo PDF para habilitar as funcionalidades.")
+    st.stop()
 
-with col1:
-    st.header("1. Faça o Upload do seu PDF")
-    arquivo_pdf = st.file_uploader("Selecione o arquivo PDF", type=["pdf"])
+pdf_bytes = arquivo_pdf.getvalue()
+texto_extraido, erro = extrair_texto_pdf(pdf_bytes)
+
+if erro:
+    st.error(erro)
+    st.stop()
+
+st.success(f"Texto extraído com sucesso! O documento contém **{len(texto_extraido)}** caracteres.")
+with st.expander("Clique para ver o texto completo extraído do PDF"):
+    st.text_area("Texto Extraído", texto_extraido, height=250, label_visibility="collapsed")
+
+tab_traducao, tab_resumo = st.tabs(["Tradução do Documento", "Resumo Inteligente"])
+
+with tab_traducao:
+    st.header("Traduzir Texto")
+    idioma = st.selectbox(
+        "Selecione o idioma de destino:",
+        ('português', 'inglês', 'espanhol', 'francês', 'alemão'),
+        key='lang_select'
+    )
+    mapa_idiomas = {'português': 'pt', 'inglês': 'en', 'espanhol': 'es', 'francês': 'fr', 'alemão': 'de'}
     
-    texto_extraido = ""
-    if arquivo_pdf is not None:
-        with st.spinner("Extraindo texto do PDF..."):
-            texto_extraido = extrair_texto_pdf(arquivo_pdf)
-        if texto_extraido:
-            st.success("Texto extraído com sucesso!")
-            with st.expander("Ver texto extraído"):
-                st.text_area("", texto_extraido, height=250)
+    if st.button("Traduzir Agora", key='translate_btn'):
+        with st.spinner(f"Traduzindo para {idioma}... Por favor, aguarde."):
+            texto_traduzido = traduzir_texto(texto_extraido, mapa_idiomas[idioma])
+        st.text_area("Resultado da Tradução", texto_traduzido, height=300)
 
-with col2:
-    st.header("2. Escolha a Ação")
-    if texto_extraido:
-        acao = st.selectbox("Selecione uma ação:", ["", "Traduzir", "Resumir"])
-
-        # --- Lógica de Tradução ---
-        if acao == "Traduzir":
-            idioma = st.selectbox(
-                "Selecione o idioma de destino:",
-                ('português', 'inglês', 'espanhol', 'francês')
-            )
-            mapa_idiomas = {'português': 'pt', 'inglês': 'en', 'espanhol': 'es', 'francês': 'fr'}
+with tab_resumo:
+    st.header("Resumir Texto")
+    modelo_selecionado = st.selectbox(
+        "Escolha o modelo de resumo:",
+        (
+            "Falconsai/text_summarization",  
+            "facebook/bart-large-cnn",       
+            "google/mt5-small"              
+        ),
+        index=0, 
+        help="Modelos maiores oferecem mais qualidade, mas demoram mais para processar."
+    )
+    
+    if st.button("Gerar Resumo Agora", key='summarize_btn'):
+        with st.status("Gerando resumo...", expanded=True) as status:
+            status.update(label="Carregando modelo de IA... (pode demorar na primeira vez)", state="running")
+            summarizer = carregar_modelo_resumo(modelo_selecionado)
             
-            if st.button("Traduzir Texto"):
-                with st.spinner(f"Traduzindo para {idioma}..."):
-                    texto_traduzido = traduzir_texto(texto_extraido, mapa_idiomas[idioma])
-                st.subheader("Resultado da Tradução")
-                st.text_area("", texto_traduzido, height=300)
-
-        # --- Lógica de Resumo ---
-        elif acao == "Resumir":
-            if st.button("Gerar Resumo"):
-                with st.spinner("Criando resumo... Isso pode levar alguns minutos."):
-                    resumo = resumir_texto(texto_extraido)
-                st.subheader("Resumo do Texto")
-                st.text_area("", resumo, height=300)
-
-st.sidebar.title("Sobre")
-st.sidebar.info(
-    "Este aplicativo foi desenvolvido para facilitar a leitura e compreensão de documentos PDF."
-    "\n\n**Tecnologias utilizadas:**"
-    "\n- Python"
-    "\n- Streamlit"
-    "\n- PyMuPDF"
-    "\n- Hugging Face Transformers"
-)
+            if summarizer:
+                status.update(label="Processando o texto e criando o resumo...", state="running")
+                resumo = resumir_texto(texto_extraido, summarizer)
+                status.update(label="Resumo concluído!", state="complete")
+                st.text_area("Resultado do Resumo", resumo, height=300)
+            else:
+                status.update(label="Falha ao carregar o modelo.", state="error")
