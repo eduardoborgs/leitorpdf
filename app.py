@@ -62,13 +62,7 @@ with st.sidebar:
     st.markdown("---")
     st.header("1. Faça o Upload do PDF")
     arquivo_pdf = st.file_uploader("Selecione o arquivo", type=["pdf"], label_visibility="collapsed")
-    st.markdown("---")
-    st.subheader("Sobre")
-    st.info(
-        "Este aplicativo foi criado para facilitar a leitura e o entendimento de documentos em PDF."
-        "\n\n**Tecnologias:**\n- Python & Streamlit\n- PyMuPDF\n- Hugging Face Transformers"
-    )
-
+    
 st.title(" ferramenta de Tradução e Resumo de PDFs")
 st.markdown("Faça o upload de um arquivo PDF na barra lateral para começar.")
 
@@ -128,3 +122,4 @@ with tab_resumo:
                 st.text_area("Resultado do Resumo", resumo, height=300)
             else:
                 status.update(label="Falha ao carregar o modelo.", state="error")
+
