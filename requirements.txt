@@ -1,0 +1,6 @@
+streamlit
+pymupdf
+deep-translator
+transformers
+torch
+sentencepiece
